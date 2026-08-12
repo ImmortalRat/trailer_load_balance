@@ -1,0 +1,296 @@
+@page "/"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject TrailerProfileService TrailerProfiles
+@inject CargoCatalogService CargoCatalog
+@inject LoadCalculationService LoadCalc
+@inject PersistenceService Persistence
+
+<PageTitle>Trailer Load Balance</PageTitle>
+
+@if (_profile is null)
+{
+    <p class="loading">Loading...</p>
+}
+else
+{
+    <div class="app-shell">
+        <header class="app-header">
+            <div class="app-title">
+                <span class="app-title-icon">🚐</span>
+                <span>Trailer Load Balance</span>
+            </div>
+            <label class="profile-select">
+                <span>Trailer</span>
+                <select value="@_profile.Id" @onchange="OnProfileChanged">
+                    @foreach (var p in _profiles)
+                    {
+                        <option value="@p.Id">@p.Name</option>
+                    }
+                </select>
+            </label>
+        </header>
+
+        <div class="app-body">
+            <aside class="app-sidebar-left">
+                <CargoPalette CatalogItems="_catalog" OnAddCargo="AddCargoFromCatalog" />
+            </aside>
+
+            <main class="app-main">
+                <TrailerFloorPlan Profile="_profile"
+                                   Cargo="_cargo"
+                                   SelectedCargoId="_selectedCargoId"
+                                   OnCargoSelected="OnCargoSelected"
+                                   OnCargoDragLive="OnCargoDragLive"
+                                   OnCargoDragCommit="OnCargoDragCommit" />
+            </main>
+
+            <aside class="app-sidebar-right">
+                @if (_result is not null)
+                {
+                    <WeightSummaryPanel Result="_result"
+                                         Profile="_profile"
+                                         EquipmentWeights="_equipmentWeights"
+                                         EquipmentInstalled="_equipmentInstalled"
+                                         TiltDeg="_tiltDeg"
+                                         OnTiltChanged="OnTiltChanged"
+                                         OnEquipmentWeightChanged="OnEquipmentWeightChanged"
+                                         OnEquipmentInstalledChanged="OnEquipmentInstalledChanged" />
+                }
+                <CargoPropertyEditor Item="SelectedCargo" OnChanged="OnCargoPropertyChanged" OnDelete="OnCargoDeleted" />
+            </aside>
+        </div>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<TrailerProfile> _profiles = [];
+    private IReadOnlyList<CargoCatalogItem> _catalog = [];
+    private TrailerProfile? _profile;
+    private readonly List<CargoItem> _cargo = [];
+    private readonly Dictionary<string, double> _equipmentWeights = [];
+    private readonly Dictionary<string, bool> _equipmentInstalled = [];
+    private double _tiltDeg;
+    private string? _selectedCargoId;
+    private LoadCalculationResult? _result;
+    private IDisposable? _syncSubscription;
+    private bool _restoring;
+
+    private CargoItem? SelectedCargo => _cargo.FirstOrDefault(c => c.Id == _selectedCargoId);
+
+    protected override void OnInitialized()
+    {
+        _profiles = TrailerProfiles.GetAll();
+        _catalog = CargoCatalog.GetAll();
+        _profile = _profiles.FirstOrDefault();
+        Recalculate();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await RestoreStateAsync();
+            _syncSubscription = await Persistence.RegisterCrossTabSyncAsync(RestoreStateAsync);
+        }
+    }
+
+    private async Task RestoreStateAsync()
+    {
+        var saved = await Persistence.LoadAsync();
+        _restoring = true;
+
+        if (saved is not null)
+        {
+            var profile = (saved.ProfileId is not null ? TrailerProfiles.GetById(saved.ProfileId) : null)
+                          ?? _profiles.FirstOrDefault();
+            _profile = profile;
+            _tiltDeg = profile is not null ? Math.Clamp(saved.TiltDeg, profile.TiltMinDeg, profile.TiltMaxDeg) : 0;
+
+            _equipmentWeights.Clear();
+            foreach (var (id, weight) in saved.EquipmentWeightOverridesLb)
+            {
+                _equipmentWeights[id] = weight;
+            }
+
+            _equipmentInstalled.Clear();
+            foreach (var (id, installed) in saved.EquipmentInstalled)
+            {
+                _equipmentInstalled[id] = installed;
+            }
+
+            _cargo.Clear();
+            _cargo.AddRange(saved.Cargo);
+            _selectedCargoId = null;
+        }
+
+        _restoring = false;
+        Recalculate();
+        StateHasChanged();
+    }
+
+    private async Task SaveStateAsync()
+    {
+        if (_restoring || _profile is null)
+        {
+            return;
+        }
+
+        await Persistence.SaveAsync(new PersistedState
+        {
+            ProfileId = _profile.Id,
+            TiltDeg = _tiltDeg,
+            EquipmentWeightOverridesLb = new Dictionary<string, double>(_equipmentWeights),
+            EquipmentInstalled = new Dictionary<string, bool>(_equipmentInstalled),
+            Cargo = [.. _cargo],
+        });
+    }
+
+    private void Recalculate()
+    {
+        if (_profile is null)
+        {
+            _result = null;
+            return;
+        }
+
+        _result = LoadCalc.Calculate(_profile, _cargo, _equipmentWeights, _equipmentInstalled, _tiltDeg);
+    }
+
+    private async Task OnProfileChanged(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString();
+        var profile = _profiles.FirstOrDefault(p => p.Id == id);
+        if (profile is null)
+        {
+            return;
+        }
+
+        _profile = profile;
+        _tiltDeg = Math.Clamp(_tiltDeg, profile.TiltMinDeg, profile.TiltMaxDeg);
+        _cargo.Clear();
+        _equipmentWeights.Clear();
+        _equipmentInstalled.Clear();
+        _selectedCargoId = null;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task AddCargoFromCatalog(CargoCatalogItem catalogItem)
+    {
+        if (_profile is null)
+        {
+            return;
+        }
+
+        var bounds = _profile.CargoBounds ?? new CargoBounds
+        {
+            XMinIn = _profile.TongueLengthIn,
+            XMaxIn = _profile.TongueLengthIn + _profile.BodyLengthIn,
+            YMinIn = -_profile.BodyWidthIn / 2,
+            YMaxIn = _profile.BodyWidthIn / 2,
+        };
+
+        var cascade = _cargo.Count * 8 % 60;
+        var x = Math.Clamp(bounds.XMinIn + 12 + cascade, bounds.XMinIn, bounds.XMaxIn - catalogItem.DefaultLengthIn);
+        var y = Math.Clamp(bounds.YMinIn + 12 + cascade, bounds.YMinIn, bounds.YMaxIn - catalogItem.DefaultWidthIn);
+
+        var item = new CargoItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = catalogItem.Name,
+            Color = catalogItem.DefaultColor,
+            XIn = x,
+            YIn = y,
+            LengthIn = catalogItem.DefaultLengthIn,
+            WidthIn = catalogItem.DefaultWidthIn,
+            HeightIn = catalogItem.DefaultHeightIn,
+            ZIn = 0,
+            WeightLb = catalogItem.DefaultWeightLb,
+        };
+
+        _cargo.Add(item);
+        _selectedCargoId = item.Id;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private Task OnCargoSelected(string? id)
+    {
+        _selectedCargoId = id;
+        return Task.CompletedTask;
+    }
+
+    private void OnCargoDragLive((string Id, double XIn, double YIn) move)
+    {
+        var item = _cargo.FirstOrDefault(c => c.Id == move.Id);
+        if (item is null)
+        {
+            return;
+        }
+        item.XIn = move.XIn;
+        item.YIn = move.YIn;
+        Recalculate();
+        StateHasChanged();
+    }
+
+    private async Task OnCargoDragCommit((string Id, double XIn, double YIn) move)
+    {
+        var item = _cargo.FirstOrDefault(c => c.Id == move.Id);
+        if (item is null)
+        {
+            return;
+        }
+        item.XIn = move.XIn;
+        item.YIn = move.YIn;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task OnCargoPropertyChanged(CargoItem _)
+    {
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task OnCargoDeleted(string id)
+    {
+        _cargo.RemoveAll(c => c.Id == id);
+        if (_selectedCargoId == id)
+        {
+            _selectedCargoId = null;
+        }
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task OnTiltChanged(double tiltDeg)
+    {
+        _tiltDeg = _profile is not null ? Math.Clamp(tiltDeg, _profile.TiltMinDeg, _profile.TiltMaxDeg) : tiltDeg;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task OnEquipmentWeightChanged((string Id, double WeightLb) change)
+    {
+        _equipmentWeights[change.Id] = change.WeightLb;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    private async Task OnEquipmentInstalledChanged((string Id, bool Installed) change)
+    {
+        _equipmentInstalled[change.Id] = change.Installed;
+        Recalculate();
+        await SaveStateAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_syncSubscription is not null)
+        {
+            _syncSubscription.Dispose();
+        }
+        await ValueTask.CompletedTask;
+    }
+}

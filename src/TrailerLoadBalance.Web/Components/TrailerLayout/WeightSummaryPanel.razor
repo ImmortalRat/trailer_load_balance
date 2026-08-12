@@ -1,0 +1,117 @@
+@using TrailerLoadBalance.Web.Models
+
+<div class="weight-summary">
+    <h2 class="panel-title">Load Summary</h2>
+
+    @if (Result.IsTongueLifting)
+    {
+        <div class="banner banner-error">Tongue weight is zero or negative - the trailer would tip back off the hitch. Move cargo forward.</div>
+    }
+    else if (Result.IsOverGvwr)
+    {
+        <div class="banner banner-error">Total weight exceeds the @Result.GvwrLb.ToString("0") lb GVWR.</div>
+    }
+    else if (Result.IsOverGawr)
+    {
+        <div class="banner banner-error">Axle load exceeds the @Result.GawrLb.ToString("0") lb GAWR.</div>
+    }
+    else if (Result.IsOverMaxTongueWeight)
+    {
+        <div class="banner banner-warn">Tongue weight exceeds the advisory @Result.MaxTongueWeightLb?.ToString("0") lb limit.</div>
+    }
+    else if (!Result.IsTongueWeightPercentInRecommendedRange)
+    {
+        <div class="banner banner-warn">Tongue weight is outside the recommended 10–15% of total weight.</div>
+    }
+
+    <div class="stat-card @(Result.IsTongueWeightPercentInRecommendedRange ? "" : "stat-warn")">
+        <div class="stat-label">Tongue Weight</div>
+        <div class="stat-value">@Result.TongueWeightLb.ToString("0") <span class="stat-unit">lb</span></div>
+        <div class="stat-sub">@Result.TongueWeightPercentOfTotal.ToString("0.#")% of total · target 10–15%</div>
+    </div>
+
+    <div class="stat-card @(Result.IsOverGvwr ? "stat-warn" : "")">
+        <div class="stat-label">Total Weight</div>
+        <div class="stat-value">@Result.TotalWeightLb.ToString("0") <span class="stat-unit">lb</span></div>
+        <div class="bar">
+            <div class="bar-fill @(Result.IsOverGvwr ? "bar-over" : "")" style="width:@(ClampPct(Result.TotalWeightLb, Result.GvwrLb).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+        </div>
+        <div class="stat-sub">of @Result.GvwrLb.ToString("0") lb GVWR · @Result.RemainingCapacityLb.ToString("0") lb remaining</div>
+    </div>
+
+    @foreach (var axle in Result.AxleLoads)
+    {
+        <div class="stat-card @(axle.IsOverRating ? "stat-warn" : "")">
+            <div class="stat-label">Axle Load — @axle.AxleId</div>
+            <div class="stat-value">@axle.LoadLb.ToString("0") <span class="stat-unit">lb</span></div>
+            <div class="bar">
+                <div class="bar-fill @(axle.IsOverRating ? "bar-over" : "")" style="width:@(ClampPct(axle.LoadLb, axle.RatingLb).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></div>
+            </div>
+            <div class="stat-sub">of @axle.RatingLb.ToString("0") lb rated</div>
+        </div>
+    }
+
+    <div class="control-group">
+        <label class="field">
+            <span>Ground tilt: @TiltDeg.ToString("0.#")&deg; (@GradePercent(TiltDeg).ToString("0.#")%) @TiltDescription(TiltDeg)</span>
+            <input type="range" min="@Profile.TiltMinDeg" max="@Profile.TiltMaxDeg" step="0.5" value="@TiltDeg"
+                   @oninput="e => OnTiltChanged.InvokeAsync(ParseOr(e.Value, TiltDeg))" />
+        </label>
+        <p class="panel-hint muted">Towing target: 0&deg; level. Up to ~0.5&deg; nose-down is fine while towing; nose-up is not recommended. Use this to model an off-level parking spot (driveways commonly run a few degrees).</p>
+    </div>
+
+    @if (Profile.Equipment.Count > 0)
+    {
+        <div class="control-group">
+            <h3 class="panel-subtitle">Equipment</h3>
+            @foreach (var eq in Profile.Equipment)
+            {
+                var installed = EquipmentInstalled.GetValueOrDefault(eq.Id, eq.IsInstalledByDefault);
+                <div class="equipment-row">
+                    <label class="checkbox-field">
+                        <input type="checkbox" checked="@installed"
+                               @onchange="e => OnEquipmentInstalledChanged.InvokeAsync((eq.Id, (bool)(e.Value ?? false)))" />
+                        <span>@eq.Name installed</span>
+                    </label>
+                    <label class="field">
+                        <span>Weight (lb)@(eq.Notes is not null ? " — estimated" : "")</span>
+                        <input type="number" min="@eq.MinWeightLb" max="@eq.MaxWeightLb" step="1"
+                               disabled="@(!eq.WeightIsConfigurable || !installed)"
+                               value="@EquipmentWeights.GetValueOrDefault(eq.Id, eq.DefaultWeightLb).ToString("0.#")"
+                               @onchange="e => OnEquipmentWeightChanged.InvokeAsync((eq.Id, ParseOr(e.Value, eq.DefaultWeightLb)))" />
+                    </label>
+                    @if (eq.Notes is not null)
+                    {
+                        <p class="panel-hint muted">@eq.Notes</p>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required LoadCalculationResult Result { get; set; }
+    [Parameter, EditorRequired] public required TrailerProfile Profile { get; set; }
+    [Parameter, EditorRequired] public required IReadOnlyDictionary<string, double> EquipmentWeights { get; set; }
+    [Parameter, EditorRequired] public required IReadOnlyDictionary<string, bool> EquipmentInstalled { get; set; }
+    [Parameter] public double TiltDeg { get; set; }
+    [Parameter] public EventCallback<double> OnTiltChanged { get; set; }
+    [Parameter] public EventCallback<(string Id, double WeightLb)> OnEquipmentWeightChanged { get; set; }
+    [Parameter] public EventCallback<(string Id, bool Installed)> OnEquipmentInstalledChanged { get; set; }
+
+    private static double ClampPct(double value, double max) =>
+        max > 0 ? Math.Min(value / max * 100.0, 100.0) : 0;
+
+    private static double GradePercent(double tiltDeg) => Math.Tan(double.DegreesToRadians(tiltDeg)) * 100.0;
+
+    private static string TiltDescription(double tiltDeg) => tiltDeg switch
+    {
+        > 0.05 => "(nose down)",
+        < -0.05 => "(nose up)",
+        _ => "(level)",
+    };
+
+    private static double ParseOr(object? value, double fallback) =>
+        double.TryParse(value?.ToString(), out var parsed) ? parsed : fallback;
+}

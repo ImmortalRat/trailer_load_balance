@@ -1,0 +1,79 @@
+@using TrailerLoadBalance.Web.Models
+
+<div class="property-editor">
+    @if (Item is null)
+    {
+        <h2 class="panel-title">Item Properties</h2>
+        <p class="panel-hint">Select a cargo item to edit its details.</p>
+    }
+    else
+    {
+        <div class="property-editor-header">
+            <h2 class="panel-title">Item Properties</h2>
+            <button type="button" class="link-danger" @onclick="() => OnDelete.InvokeAsync(Item.Id)">Remove</button>
+        </div>
+
+        <label class="field">
+            <span>Name</span>
+            <input type="text" value="@Item.Name" @onchange="e => UpdateField(i => i.Name = (string)(e.Value ?? string.Empty))" />
+        </label>
+
+        <label class="field">
+            <span>Color</span>
+            <input type="color" value="@Item.Color" @onchange="e => UpdateField(i => i.Color = (string)(e.Value ?? i.Color))" />
+        </label>
+
+        <div class="field-row">
+            <label class="field">
+                <span>Length (in)</span>
+                <input type="number" min="1" step="0.5" value="@Item.LengthIn.ToString("0.##")"
+                       @onchange="e => UpdateField(i => i.LengthIn = ParseOr(e.Value, i.LengthIn))" />
+            </label>
+            <label class="field">
+                <span>Width (in)</span>
+                <input type="number" min="1" step="0.5" value="@Item.WidthIn.ToString("0.##")"
+                       @onchange="e => UpdateField(i => i.WidthIn = ParseOr(e.Value, i.WidthIn))" />
+            </label>
+        </div>
+
+        <div class="field-row">
+            <label class="field">
+                <span>X from hitch (in)</span>
+                <input type="number" step="0.5" value="@Item.XIn.ToString("0.##")"
+                       @onchange="e => UpdateField(i => i.XIn = ParseOr(e.Value, i.XIn))" />
+            </label>
+            <label class="field">
+                <span>Y from center (in)</span>
+                <input type="number" step="0.5" value="@Item.YIn.ToString("0.##")"
+                       @onchange="e => UpdateField(i => i.YIn = ParseOr(e.Value, i.YIn))" />
+            </label>
+        </div>
+
+        <label class="field">
+            <span>Weight (lb)</span>
+            <input type="number" min="0" step="1" value="@Item.WeightLb.ToString("0.#")"
+                   @onchange="e => UpdateField(i => i.WeightLb = ParseOr(e.Value, i.WeightLb))" />
+        </label>
+
+        <p class="panel-hint muted">Height fixed at @(Item.HeightIn.ToString("0")) in, resting on the floor.</p>
+    }
+</div>
+
+@code {
+    [Parameter] public CargoItem? Item { get; set; }
+    [Parameter] public EventCallback<CargoItem> OnChanged { get; set; }
+    [Parameter] public EventCallback<string> OnDelete { get; set; }
+
+    private void UpdateField(Action<CargoItem> mutate)
+    {
+        if (Item is null)
+        {
+            return;
+        }
+        mutate(Item);
+        OnChanged.InvokeAsync(Item);
+    }
+
+    private static double ParseOr(object? value, double fallback) =>
+        double.TryParse(value?.ToString(), out var parsed) && parsed > 0 ? parsed : fallback;
+}
