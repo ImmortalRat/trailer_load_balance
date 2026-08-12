@@ -9,7 +9,10 @@ behind the physics model and the bundled trailer profile.
 
 ## Features
 
-- Top-down floor plan of the selected trailer, with drag-and-drop cargo placement.
+- Top-down floor plan of the selected trailer, with axle/wheel positions and an approximate
+  interior layout (dinette, galley + fridge, bunks, bathroom) shown for reference.
+- Drag a cargo item from the palette straight onto the trailer to place it, or click to add it;
+  reposition by dragging, resize/rename/recolor via the property panel.
 - Real-time tongue weight (lb and % of total), total weight vs. GVWR, and per-axle load vs. GAWR.
 - Adjustable ground tilt (e.g. for an off-level driveway) that correctly factors cargo/equipment
   height into the load calculation.

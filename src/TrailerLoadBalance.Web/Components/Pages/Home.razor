@@ -5,6 +5,7 @@
 @inject CargoCatalogService CargoCatalog
 @inject LoadCalculationService LoadCalc
 @inject PersistenceService Persistence
+@inject ILogger<Home> Logger
 
 <PageTitle>Trailer Load Balance</PageTitle>
 
@@ -42,7 +43,8 @@ else
                                    SelectedCargoId="_selectedCargoId"
                                    OnCargoSelected="OnCargoSelected"
                                    OnCargoDragLive="OnCargoDragLive"
-                                   OnCargoDragCommit="OnCargoDragCommit" />
+                                   OnCargoDragCommit="OnCargoDragCommit"
+                                   OnCatalogItemDropped="OnCatalogItemDropped" />
             </main>
 
             <aside class="app-sidebar-right">
@@ -88,10 +90,22 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // PersistenceService already swallows JS interop failures, but an unhandled exception
+        // here would otherwise tear down the whole Blazor Server circuit and leave the page
+        // permanently unresponsive - so treat "couldn't restore/sync" as non-fatal too.
+        try
         {
             await RestoreStateAsync();
             _syncSubscription = await Persistence.RegisterCrossTabSyncAsync(RestoreStateAsync);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Could not restore or sync persisted trailer state");
         }
     }
 
@@ -176,6 +190,14 @@ else
         await SaveStateAsync();
     }
 
+    private CargoBounds EffectiveBounds(TrailerProfile profile) => profile.CargoBounds ?? new CargoBounds
+    {
+        XMinIn = profile.TongueLengthIn,
+        XMaxIn = profile.TongueLengthIn + profile.BodyLengthIn,
+        YMinIn = -profile.BodyWidthIn / 2,
+        YMaxIn = profile.BodyWidthIn / 2,
+    };
+
     private async Task AddCargoFromCatalog(CargoCatalogItem catalogItem)
     {
         if (_profile is null)
@@ -183,18 +205,37 @@ else
             return;
         }
 
-        var bounds = _profile.CargoBounds ?? new CargoBounds
-        {
-            XMinIn = _profile.TongueLengthIn,
-            XMaxIn = _profile.TongueLengthIn + _profile.BodyLengthIn,
-            YMinIn = -_profile.BodyWidthIn / 2,
-            YMaxIn = _profile.BodyWidthIn / 2,
-        };
-
+        var bounds = EffectiveBounds(_profile);
         var cascade = _cargo.Count * 8 % 60;
         var x = Math.Clamp(bounds.XMinIn + 12 + cascade, bounds.XMinIn, bounds.XMaxIn - catalogItem.DefaultLengthIn);
         var y = Math.Clamp(bounds.YMinIn + 12 + cascade, bounds.YMinIn, bounds.YMaxIn - catalogItem.DefaultWidthIn);
 
+        await PlaceNewCargoAsync(catalogItem, x, y);
+    }
+
+    private async Task OnCatalogItemDropped((string CatalogId, double XIn, double YIn) drop)
+    {
+        if (_profile is null)
+        {
+            return;
+        }
+
+        var catalogItem = _catalog.FirstOrDefault(c => c.Id == drop.CatalogId);
+        if (catalogItem is null)
+        {
+            return;
+        }
+
+        var bounds = EffectiveBounds(_profile);
+        // The drop point is where the cursor released - center the new item under it.
+        var x = Math.Clamp(drop.XIn - catalogItem.DefaultLengthIn / 2, bounds.XMinIn, bounds.XMaxIn - catalogItem.DefaultLengthIn);
+        var y = Math.Clamp(drop.YIn - catalogItem.DefaultWidthIn / 2, bounds.YMinIn, bounds.YMaxIn - catalogItem.DefaultWidthIn);
+
+        await PlaceNewCargoAsync(catalogItem, x, y);
+    }
+
+    private async Task PlaceNewCargoAsync(CargoCatalogItem catalogItem, double x, double y)
+    {
         var item = new CargoItem
         {
             Id = Guid.NewGuid().ToString("N"),

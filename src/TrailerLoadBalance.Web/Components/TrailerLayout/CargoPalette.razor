@@ -2,11 +2,12 @@
 
 <div class="cargo-palette">
     <h2 class="panel-title">Cargo</h2>
-    <p class="panel-hint">Add an item, then drag it into place on the trailer.</p>
+    <p class="panel-hint">Drag an item onto the trailer, or click to add it.</p>
     <div class="palette-list">
         @foreach (var item in CatalogItems)
         {
-            <button type="button" class="palette-item" @onclick="() => OnAddCargo.InvokeAsync(item)">
+            <button type="button" class="palette-item" draggable="true" data-catalog-id="@item.Id"
+                    @onclick="() => OnAddCargo.InvokeAsync(item)">
                 <span class="palette-icon">@(item.IconEmoji ?? "📦")</span>
                 <span class="palette-name">@item.Name</span>
                 @if (!item.IsCustomizable)

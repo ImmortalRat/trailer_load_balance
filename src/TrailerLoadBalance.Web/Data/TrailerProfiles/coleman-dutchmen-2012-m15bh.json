@@ -25,6 +25,9 @@
   "axles": [
     { "id": "axle-1", "positionFromHitchIn": 159.0, "ratingLb": 3500.0 }
   ],
+  "wheelWidthIn": 8.0,
+  "wheelDiameterIn": 27.0,
+  "trackWidthHalfIn": 40.0,
 
   "equipment": [
     {
@@ -47,5 +50,13 @@
   "tiltMinDeg": -12.0,
   "tiltMaxDeg": 12.0,
 
-  "cargoBounds": { "xMinIn": 47.5, "xMaxIn": 222.5, "yMinIn": -45.5, "yMaxIn": 45.5 }
+  "cargoBounds": { "xMinIn": 47.5, "xMaxIn": 222.5, "yMinIn": -45.5, "yMaxIn": 45.5 },
+
+  "floorZones": [
+    { "name": "Dinette (converts to bed)", "kind": "room", "xMinIn": 45.0, "xMaxIn": 99.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Galley", "kind": "room", "xMinIn": 99.0, "xMaxIn": 153.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Bunks + closet", "kind": "room", "xMinIn": 153.0, "xMaxIn": 201.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Bathroom", "kind": "room", "xMinIn": 201.0, "xMaxIn": 225.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Refrigerator", "kind": "fixture", "xMinIn": 99.0, "xMaxIn": 123.0, "yMinIn": -48.0, "yMaxIn": -24.0 }
+  ]
 }

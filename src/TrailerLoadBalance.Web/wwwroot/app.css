@@ -221,7 +221,7 @@ body {
     background: var(--color-surface-alt);
     font: inherit;
     text-align: left;
-    cursor: pointer;
+    cursor: grab;
     transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -232,6 +232,7 @@ body {
 }
 
 .palette-item:active {
+    cursor: grabbing;
     transform: translateY(0);
 }
 
@@ -285,8 +286,47 @@ body {
     stroke-dasharray: 2 2;
 }
 
+.wheel {
+    fill: #454b58;
+    stroke: #2b2f38;
+    stroke-width: 0.4;
+}
+
 .hitch-ball {
     fill: #6b7690;
+}
+
+.floor-zone-room {
+    fill: rgba(63, 111, 219, 0.045);
+    stroke: rgba(63, 111, 219, 0.22);
+    stroke-width: 0.4;
+    stroke-dasharray: 1.5 1.5;
+    pointer-events: none;
+}
+
+.floor-zone-label {
+    font-size: 3.1px;
+    fill: #8f9ab3;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.floor-zone-fixture {
+    fill: rgba(103, 114, 138, 0.16);
+    stroke: rgba(103, 114, 138, 0.4);
+    stroke-width: 0.4;
+    pointer-events: none;
+}
+
+.floor-zone-fixture-label {
+    font-size: 2.9px;
+    fill: #5a6478;
+    text-anchor: middle;
+    dominant-baseline: middle;
+    pointer-events: none;
 }
 
 .equipment-marker circle {

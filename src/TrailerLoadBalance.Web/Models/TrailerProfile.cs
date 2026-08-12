@@ -65,6 +65,26 @@ public sealed class TrailerProfile
 
     public required IReadOnlyList<AxleSpec> Axles { get; init; }
 
+    /// <summary>Wheel/tire width, for rendering (inches). Purely visual - not used in the calculation.</summary>
+    public double WheelWidthIn { get; init; } = 8;
+
+    /// <summary>Wheel/tire diameter, for rendering (inches). Purely visual - not used in the calculation.</summary>
+    public double WheelDiameterIn { get; init; } = 27;
+
+    /// <summary>
+    /// Distance from centerline to the center of each wheel (inches) - i.e. half the track width.
+    /// Purely visual - not used in the calculation.
+    /// </summary>
+    public double TrackWidthHalfIn { get; init; } = 40;
+
+    /// <summary>
+    /// Approximate interior layout regions (dinette, galley, bunks, bathroom, ...), for visual
+    /// reference only - not used in the load calculation and not enforced as placement bounds.
+    /// Since no factory dimensional diagram is publicly available for the bundled profile, these
+    /// are proportional estimates from the confirmed front-to-rear room order; see requirements.md.
+    /// </summary>
+    public IReadOnlyList<FloorZone> FloorZones { get; init; } = [];
+
     /// <summary>Optional/aftermarket equipment bundled with this profile (e.g. rooftop A/C).</summary>
     public IReadOnlyList<EquipmentItem> Equipment { get; init; } = [];
 
@@ -84,6 +104,25 @@ public sealed class TrailerProfile
 
 public sealed class CargoBounds
 {
+    public required double XMinIn { get; init; }
+    public required double XMaxIn { get; init; }
+    public required double YMinIn { get; init; }
+    public required double YMaxIn { get; init; }
+}
+
+/// <summary>
+/// A labeled interior region or fixture footprint, drawn as a reference overlay on the floor
+/// plan so the user can see roughly what's already built in (a fridge, the bathroom, bunks, ...)
+/// versus open floor. Visual only - cargo is not blocked from being placed on top of a zone,
+/// since in practice cargo often does go on/under furniture (e.g. under a dinette bed).
+/// </summary>
+public sealed class FloorZone
+{
+    public required string Name { get; init; }
+
+    /// <summary>Category used to pick a rendering style: "room" (broad area) or "fixture" (a specific built-in item).</summary>
+    public required string Kind { get; init; }
+
     public required double XMinIn { get; init; }
     public required double XMaxIn { get; init; }
     public required double YMinIn { get; init; }

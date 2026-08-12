@@ -2,6 +2,7 @@
 @using TrailerLoadBalance.Web.Models
 @implements IAsyncDisposable
 @inject IJSRuntime Js
+@inject ILogger<TrailerFloorPlan> Logger
 
 <div class="floor-plan-wrap">
     <svg id="@_containerId"
@@ -20,15 +21,62 @@
               width="@Profile.BodyLengthIn.ToString("0.##", CultureInfo.InvariantCulture)"
               height="@Profile.BodyWidthIn.ToString("0.##", CultureInfo.InvariantCulture)" />
 
-        <!-- Axle marker(s) -->
+        <!-- Interior layout reference (rooms + fixtures) -->
+        @foreach (var zone in Profile.FloorZones.Where(z => z.Kind == "room"))
+        {
+            <g class="floor-zone">
+                <rect class="floor-zone-room"
+                      x="@zone.XMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      y="@zone.YMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      width="@((zone.XMaxIn - zone.XMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      height="@((zone.YMaxIn - zone.YMinIn).ToString("0.##", CultureInfo.InvariantCulture))" />
+                <text class="floor-zone-label"
+                      x="@(((zone.XMinIn + zone.XMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                      y="@((zone.YMinIn + (zone.YMaxIn - zone.YMinIn) * 0.22).ToString("0.##", CultureInfo.InvariantCulture))">
+                    @zone.Name
+                </text>
+            </g>
+        }
+        @foreach (var zone in Profile.FloorZones.Where(z => z.Kind == "fixture"))
+        {
+            <g class="floor-zone">
+                <rect class="floor-zone-fixture"
+                      x="@zone.XMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      y="@zone.YMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      width="@((zone.XMaxIn - zone.XMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      height="@((zone.YMaxIn - zone.YMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      rx="0.8" />
+                <text class="floor-zone-fixture-label"
+                      x="@(((zone.XMinIn + zone.XMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                      y="@(((zone.YMinIn + zone.YMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))">
+                    @zone.Name
+                </text>
+            </g>
+        }
+
+        <!-- Axle + wheel markers -->
         @foreach (var axle in Profile.Axles)
         {
-            var axleX = Profile.TongueLengthIn + axle.PositionFromHitchIn;
+            var axleX = axle.PositionFromHitchIn;
+            var wheelHalfW = Profile.WheelDiameterIn / 2;
+            var wheelHalfH = Profile.WheelWidthIn / 2;
             <line class="axle-line"
                   x1="@axleX.ToString("0.##", CultureInfo.InvariantCulture)"
                   y1="@((-TotalWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))"
                   x2="@axleX.ToString("0.##", CultureInfo.InvariantCulture)"
                   y2="@((TotalWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))" />
+            <rect class="wheel"
+                  x="@((axleX - wheelHalfW).ToString("0.##", CultureInfo.InvariantCulture))"
+                  y="@((-Profile.TrackWidthHalfIn - wheelHalfH).ToString("0.##", CultureInfo.InvariantCulture))"
+                  width="@Profile.WheelDiameterIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  height="@Profile.WheelWidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  rx="1.2" />
+            <rect class="wheel"
+                  x="@((axleX - wheelHalfW).ToString("0.##", CultureInfo.InvariantCulture))"
+                  y="@((Profile.TrackWidthHalfIn - wheelHalfH).ToString("0.##", CultureInfo.InvariantCulture))"
+                  width="@Profile.WheelDiameterIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  height="@Profile.WheelWidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  rx="1.2" />
         }
 
         <!-- Hitch ball -->
@@ -37,8 +85,7 @@
         <!-- Equipment (fixed position, e.g. roof A/C) -->
         @foreach (var eq in Profile.Equipment)
         {
-            var ex = Profile.TongueLengthIn + eq.XIn;
-            <g class="equipment-marker" transform="translate(@ex.ToString("0.##", CultureInfo.InvariantCulture) @eq.YIn.ToString("0.##", CultureInfo.InvariantCulture))">
+            <g class="equipment-marker" transform="translate(@eq.XIn.ToString("0.##", CultureInfo.InvariantCulture) @eq.YIn.ToString("0.##", CultureInfo.InvariantCulture))">
                 <circle r="3.2" />
                 <text class="equipment-label" y="6">@eq.Name</text>
             </g>
@@ -88,6 +135,7 @@
     [Parameter] public EventCallback<string?> OnCargoSelected { get; set; }
     [Parameter] public EventCallback<(string Id, double XIn, double YIn)> OnCargoDragLive { get; set; }
     [Parameter] public EventCallback<(string Id, double XIn, double YIn)> OnCargoDragCommit { get; set; }
+    [Parameter] public EventCallback<(string CatalogId, double XIn, double YIn)> OnCatalogItemDropped { get; set; }
 
     private double TotalLengthIn => Profile.TongueLengthIn + Profile.BodyLengthIn;
     private double TotalWidthIn => Profile.BodyWidthIn;
@@ -112,10 +160,21 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender)
         {
-            _selfRef = DotNetObjectReference.Create(this);
-            await Js.InvokeVoidAsync("tlb.initFloorPlan", _containerId, _selfRef, TotalLengthIn);
+            return;
+        }
+
+        _selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            await Js.InvokeVoidAsync("tlb.initFloorPlan", _containerId, _selfRef, TotalLengthIn, TotalWidthIn);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Without this, drag-and-drop just won't be interactive - not worth tearing down
+            // the whole circuit over (the rest of the page, including click-to-add, still works).
+            Logger.LogWarning(ex, "Could not initialize floor plan drag interaction");
         }
     }
 
@@ -126,6 +185,10 @@
     [JSInvokable]
     public Task OnCargoDragging(string id, double xIn, double yIn) =>
         OnCargoDragLive.InvokeAsync((id, xIn, yIn));
+
+    [JSInvokable]
+    public Task OnCatalogDrop(string catalogId, double xIn, double yIn) =>
+        OnCatalogItemDropped.InvokeAsync((catalogId, xIn, yIn));
 
     [JSInvokable]
     public async Task OnCargoDragEnd(string id, double xIn, double yIn, bool moved)

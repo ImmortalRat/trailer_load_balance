@@ -233,20 +233,100 @@ its own rating and the combined GAWR.
   survives a reload. Cross-tab sync uses the browser's native `storage` event (fires in other
   already-open tabs automatically) plus a `visibilitychange` listener as a fallback so switching
   back to a stale tab refreshes it.
+- **FloorZone** (profile-level, not user data): a labeled reference rectangle (`Name, Kind
+  ("room" | "fixture"), XMinIn/XMaxIn/YMinIn/YMaxIn`) drawn on the floor plan so the user can see
+  what's already built into the trailer (dinette, galley, bunks, bathroom, and a refrigerator
+  fixture within the galley) versus open floor. Visual reference only - cargo is not blocked from
+  being placed over a zone, since real cargo often does go on/under/in furniture. See §8.2 for the
+  bundled profile's zone data and its sourcing.
+- **Wheel/axle rendering geometry** (profile-level): `WheelWidthIn`, `WheelDiameterIn`,
+  `TrackWidthHalfIn` (half the hub-to-hub distance). Purely visual (not used in the load
+  calculation) - lets the floor plan show actual wheel positions next to the axle centerline.
 
 ## 7. Scope decisions (beyond the sourced/derived numbers above)
 
 A few implementation choices were made to keep the first version focused on what was explicitly
-asked for:
+asked for. Some were later revisited based on user testing - see §8.
 
 - **Cargo bounds** are enforced (drag is clamped to the trailer's usable floor area, from a
-  `cargoBounds` field on the profile) but **obstruction zones** (e.g. wheel wells) and named
-  interior "rooms" are not modeled or rendered - not requested, and collision-aware placement
-  would meaningfully expand scope for a first version.
-- **Adding** a cargo item is a click on the palette (which places it at a sensible default spot
-  and selects it); **repositioning** is drag-and-drop on the floor plan, and **resizing** is via
-  the numeric property editor. Full native-HTML5 drag-from-palette-to-canvas was considered but
-  skipped - Blazor Server's `DataTransfer` support for that pattern is unreliable, and this
-  simpler flow satisfies the "drag and drop to place cargo" requirement without that risk.
+  `cargoBounds` field on the profile). Interior room/fixture zones are now rendered too (§8.2),
+  but remain visual-only - not enforced as hard collision.
+- **Resizing** cargo is via the numeric property editor, not drag-handles on the floor plan.
 - Cargo height is fixed at 12 in per the brief ("for now"); the field exists per-item so a future
   predefined cargo type can carry its own height.
+
+## 8. Post-launch fixes and additions (from user testing)
+
+### 8.1 Circuit-killing localStorage bug
+
+**Symptom reported:** cargo couldn't be added by clicking the palette button or by dragging -
+the page appeared completely unresponsive to input.
+
+**Root cause:** in a browser with `localStorage` blocked (private/incognito windows, strict
+privacy settings, some mobile/corporate browser configurations), `localStorage.getItem`/`setItem`
+*throw* rather than silently no-op. That exception propagated up through the JS interop call into
+`RestoreStateAsync`, called from `OnAfterRenderAsync` - an unhandled exception in a Blazor Server
+lifecycle method tears down the entire SignalR circuit. Once the circuit is gone, the page is
+still visible (it was already rendered) but permanently inert: no click, no drag, nothing calls
+back to the server anymore. This was confirmed by reproducing it directly (stubbing
+`window.localStorage` to throw a `SecurityError`, matching what real browsers do) and observing
+the exact symptom, then confirming the fix resolves it.
+
+**Fix:** persistence is a nice-to-have, not core functionality, so every layer that touches it now
+degrades gracefully instead of propagating:
+- `app.js`'s `saveState`/`loadState`/`registerSync` wrap `localStorage` access in `try/catch`,
+  logging a console warning and returning `null`/no-op on failure instead of throwing.
+- `PersistenceService` (C#) additionally wraps every JS interop call in `try/catch` for
+  `JSException`/`JSDisconnectedException`/`OperationCanceledException`, as defense in depth against
+  any other interop failure mode.
+- Both `OnAfterRenderAsync` call sites (`Home.razor`'s state restore, `TrailerFloorPlan.razor`'s
+  drag-interaction init) now catch those same exception types around their JS interop calls, so a
+  failure there degrades to "this session isn't persisted" / "drag isn't interactive" rather than
+  killing the whole page.
+
+### 8.2 Interior floor plan zones
+
+The room order established in the original research (front dinette → mid galley → rear bunks +
+bathroom) is confirmed but no dimensioned floor-plan diagram is publicly available for this model
+(checked RV spec databases, dealer listings, and brochure archives again specifically for this).
+Zone boundaries are therefore **proportional estimates**, not sourced measurements, split across
+the 180 in body (starting at X=45, the front wall) in the room order confirmed by research:
+
+| Zone | X range (in, from hitch) | Basis |
+|---|---|---|
+| Dinette (converts to bed) | 45–99 (54 in deep) | Proportional estimate; U-dinette spans full width per research. |
+| Galley | 99–153 (54 in) | Proportional estimate. |
+| Bunks + closet | 153–201 (48 in) | Proportional estimate; the derived axle position (159 in, §4.2) falls inside this zone, consistent with a rear-loaded mass distribution. |
+| Bathroom | 201–225 (24 in) | Proportional estimate; matches rear-most position from research. |
+| Refrigerator (fixture) | 99–123 in (galley), road-side wall | Estimate: ~24×24 in footprint, placed along the wall opposite an assumed curb-side entry door (common RV convention - entry door side for this specific unit was not found in research). |
+
+These are rendered as labeled, low-opacity background regions (rooms) and a darker fixture
+rectangle (fridge) - purely for spatial reference, not enforced as placement limits. If a factory
+floor-plan diagram is ever obtained, replace these estimates with sourced boundaries.
+
+### 8.3 Wheel/axle rendering fix
+
+The floor plan originally rendered the axle line and the roof A/C marker at `tongueLengthIn +
+PositionFromHitchIn` / `tongueLengthIn + eq.XIn`. This double-counted the tongue length: both
+`AxleSpec.PositionFromHitchIn` and `EquipmentItem.XIn` are already defined (and used by
+`LoadCalculationService`) as absolute distances from the hitch ball, the same coordinate origin
+the rest of the SVG uses (X=0 at the hitch). The bug shifted the axle/wheels and the A/C marker 45
+in too far toward the rear - visually placing the A/C over the galley instead of the dinette,
+contradicting §4.3's sourced placement. Fixed by using the fields directly with no added offset;
+covered by the existing coordinate-frame documentation in the `TrailerProfile` doc comment, which
+was correct - only the rendering code had the bug.
+
+Wheels are drawn as two rectangles straddling the axle line at `±TrackWidthHalfIn` from
+centerline, sized `WheelWidthIn × WheelDiameterIn` (§6).
+
+### 8.4 Drag-from-palette-to-canvas
+
+User testing showed the expectation was to *drag* a palette item directly onto the trailer to
+place it, not just click it. Added alongside the existing click-to-add (both work now): palette
+buttons are `draggable="true"` with a `data-catalog-id`; native HTML5 drag-and-drop is handled
+entirely in `app.js` (a document-level `dragstart` listener reads the catalog id, the floor plan's
+`dragover`/`drop` listeners compute the drop position in inches and call back into Blazor with the
+catalog id + position). This sidesteps the earlier concern about Blazor's `DataTransfer` C# API
+(§7, original) - no Blazor drag event args are used at all, only a single JS→.NET call at drop
+time, the same pattern as the existing cargo-repositioning drag. The dropped item is centered
+under the cursor and clamped to the profile's cargo bounds.
