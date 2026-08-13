@@ -25,6 +25,28 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 
 app.UseAntiforgery();
 
+// Static assets under _framework/, js/, etc. are content-fingerprinted (their filename encodes a
+// hash of their content) and MapStaticAssets already marks them cacheable forever - that's fine
+// since a new build gets a new filename. The HTML document itself is what *references* those
+// fingerprinted filenames, though, and it is NOT fingerprinted - if a browser (or an intermediate
+// proxy/cache) holds onto a stale copy of the page after a redeploy, it will reference a
+// fingerprinted asset filename that no longer exists in the new build, 404 trying to load it, and
+// the whole app becomes non-interactive since the Blazor circuit can never start. Force the HTML
+// document to always be revalidated so a stale page can never outlive a redeploy.
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        if (context.Response.ContentType?.Contains("text/html", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            context.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+            context.Response.Headers.Pragma = "no-cache";
+        }
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
