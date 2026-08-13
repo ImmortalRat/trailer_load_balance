@@ -340,3 +340,47 @@ while hovered, and on release - if released over the floor plan - the drop posit
 catalog id are sent to Blazor via the same `OnCatalogDrop` callback as before. No native
 `DataTransfer` API is used at any point. The dropped item is centered under the cursor and clamped
 to the profile's cargo bounds.
+
+### 8.5 The actual root cause: `_framework/blazor.web.js` missing from the Docker image
+
+None of the fixes above (8.1, 8.3, 8.4) were the real problem. User testing after each fix kept
+hitting the same wall - eventually a browser console error surfaced it directly: a 404 for
+`/_framework/blazor.web.js`, the script that boots the entire Blazor Server client runtime. If it
+can't load, the SignalR circuit never starts and the page is permanently inert - no click, no
+drag, no slider does anything - which retroactively explains every symptom reported across all
+three rounds of "testing" (they were all downstream of the same missing file, not separate bugs).
+
+The first hypothesis (browser caching a stale HTML page referencing an old content-hashed
+filename after a redeploy, §8.1's `Cache-Control` fix) was plausible and worth fixing regardless,
+but the user did a full clean rebuild (`--no-cache` + `--force-recreate`) and a hard refresh and
+still hit the identical 404 - ruling out staleness as *the* cause here.
+
+**Confirmed root cause** (reproduced directly by standing up a real Docker daemon and running the
+actual multi-stage build): the original `Dockerfile` ran `dotnet restore` *without* `-c Release`,
+then `dotnet publish -c Release --no-restore` in a later layer:
+
+```dockerfile
+RUN dotnet restore TrailerLoadBalance.Web/TrailerLoadBalance.Web.csproj
+...
+RUN dotnet publish TrailerLoadBalance.Web/TrailerLoadBalance.Web.csproj -c Release -o /app --no-restore
+```
+
+Because the two commands target different configurations, and `--no-restore` skips re-resolving
+anything, the Release-specific static web asset generation - which is what copies
+`wwwroot/_framework/blazor.web.js` (sourced from the `Microsoft.AspNetCore.App.internal.assets`
+NuGet package) into the publish output - was not reliably produced. This was verified two ways:
+(1) a full real `docker compose build` produced a working, running image whose
+`wwwroot/_framework/` directory was completely absent; (2) an A/B test with an offline NuGet
+cache mounted (to control for network variability) showed the split
+restore-then-`--no-restore`-publish sequence still reaching for the network and failing even with
+every package already available locally, while a *single* `dotnet publish -c Release` (implicit,
+correctly-configured restore) succeeded from the same offline cache and produced a complete
+`_framework/` directory every time.
+
+**Fix:** the Dockerfile now runs one `dotnet publish -c Release` with no separate restore step, so
+restore always resolves for the exact configuration being published. This trades a small amount of
+Docker layer-caching (restore can no longer be cached independently of full source changes) for
+a build that doesn't silently ship without a working UI - the right trade for a small, infrequently
+rebuilt home-server app. Re-verified end-to-end against a real container: click-to-add,
+palette-drag-to-add, tilt slider, and equipment weight override were all tested via a live
+browser against the actual built image and confirmed working.
