@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TrailerLoadBalance.Tests/TrailerLoadBalance.Tests.csproj" />
+  <Project Path="TrailerLoadBalance.Web/TrailerLoadBalance.Web.csproj" />
+</Solution>

@@ -1,0 +1,62 @@
+{
+  "id": "coleman-dutchmen-2012-m15bh",
+  "name": "2012 Coleman by Dutchmen M-15BH",
+  "manufacturer": "Dutchmen",
+  "model": "M-15BH",
+  "year": 2012,
+  "serialNumberPattern": "CTS15BH",
+
+  "bodyLengthIn": 180.0,
+  "bodyWidthIn": 96.0,
+  "interiorHeightIn": 78.0,
+  "interiorWidthIn": 91.0,
+  "tongueLengthIn": 45.0,
+
+  "floorHeightAboveGroundIn": 22.0,
+  "ballHeightAboveGroundIn": 18.0,
+  "dryCgHeightAboveFloorIn": 19.0,
+
+  "gvwrLb": 3800.0,
+  "gawrLb": 3500.0,
+  "dryWeightLb": 2715.0,
+  "factoryTongueWeightLb": 317.0,
+  "maxTongueWeightLb": 500.0,
+
+  "axles": [
+    { "id": "axle-1", "positionFromHitchIn": 159.0, "ratingLb": 3500.0 }
+  ],
+  "wheelWidthIn": 8.0,
+  "wheelDiameterIn": 27.0,
+  "trackWidthHalfIn": 40.0,
+
+  "equipment": [
+    {
+      "id": "roof-ac",
+      "name": "Rooftop A/C",
+      "xIn": 80.0,
+      "yIn": 0.0,
+      "zIn": 88.0,
+      "defaultWeightLb": 95.0,
+      "minWeightLb": 40.0,
+      "maxWeightLb": 150.0,
+      "weightIsConfigurable": true,
+      "isIncludedInDryWeight": false,
+      "isInstalledByDefault": true,
+      "notes": "Likely aftermarket - not part of factory dry weight. Estimated for a 13,500 BTU-class rooftop unit plus interior ceiling assembly; adjust to match the actual installed unit."
+    }
+  ],
+
+  "defaultTiltDeg": 0.0,
+  "tiltMinDeg": -12.0,
+  "tiltMaxDeg": 12.0,
+
+  "cargoBounds": { "xMinIn": 47.5, "xMaxIn": 222.5, "yMinIn": -45.5, "yMaxIn": 45.5 },
+
+  "floorZones": [
+    { "name": "Dinette (converts to bed)", "kind": "room", "xMinIn": 45.0, "xMaxIn": 99.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Galley", "kind": "room", "xMinIn": 99.0, "xMaxIn": 153.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Bunks + closet", "kind": "room", "xMinIn": 153.0, "xMaxIn": 201.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Bathroom", "kind": "room", "xMinIn": 201.0, "xMaxIn": 225.0, "yMinIn": -48.0, "yMaxIn": 48.0 },
+    { "name": "Refrigerator", "kind": "fixture", "xMinIn": 99.0, "xMaxIn": 123.0, "yMinIn": -48.0, "yMaxIn": -24.0 }
+  ]
+}

@@ -1,0 +1,218 @@
+@using System.Globalization
+@using TrailerLoadBalance.Web.Models
+@implements IAsyncDisposable
+@inject IJSRuntime Js
+@inject ILogger<TrailerFloorPlan> Logger
+
+<div class="floor-plan-wrap">
+    <svg id="@_containerId"
+         class="floor-plan"
+         viewBox="0 @((-TotalWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture)) @TotalLengthIn.ToString("0.##", CultureInfo.InvariantCulture) @TotalWidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+         preserveAspectRatio="xMinYMin meet"
+         @onclick="OnBackgroundClick">
+
+        <!-- Tongue / A-frame -->
+        <polygon class="tongue" points="@TonguePoints" />
+
+        <!-- Trailer body outline -->
+        <rect class="body-outline"
+              x="@Profile.TongueLengthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+              y="@((-Profile.BodyWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+              width="@Profile.BodyLengthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+              height="@Profile.BodyWidthIn.ToString("0.##", CultureInfo.InvariantCulture)" />
+
+        <!-- Interior layout reference (rooms + fixtures) -->
+        @foreach (var zone in Profile.FloorZones.Where(z => z.Kind == "room"))
+        {
+            <g class="floor-zone">
+                <rect class="floor-zone-room"
+                      x="@zone.XMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      y="@zone.YMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      width="@((zone.XMaxIn - zone.XMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      height="@((zone.YMaxIn - zone.YMinIn).ToString("0.##", CultureInfo.InvariantCulture))" />
+                <text class="floor-zone-label"
+                      x="@(((zone.XMinIn + zone.XMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                      y="@((zone.YMinIn + (zone.YMaxIn - zone.YMinIn) * 0.22).ToString("0.##", CultureInfo.InvariantCulture))">
+                    @zone.Name
+                </text>
+            </g>
+        }
+        @foreach (var zone in Profile.FloorZones.Where(z => z.Kind == "fixture"))
+        {
+            <g class="floor-zone">
+                <rect class="floor-zone-fixture"
+                      x="@zone.XMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      y="@zone.YMinIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      width="@((zone.XMaxIn - zone.XMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      height="@((zone.YMaxIn - zone.YMinIn).ToString("0.##", CultureInfo.InvariantCulture))"
+                      rx="0.8" />
+                <text class="floor-zone-fixture-label"
+                      x="@(((zone.XMinIn + zone.XMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                      y="@(((zone.YMinIn + zone.YMaxIn) / 2).ToString("0.##", CultureInfo.InvariantCulture))">
+                    @zone.Name
+                </text>
+            </g>
+        }
+
+        <!-- Axle + wheel markers -->
+        @foreach (var axle in Profile.Axles)
+        {
+            var axleX = axle.PositionFromHitchIn;
+            var wheelHalfW = Profile.WheelDiameterIn / 2;
+            var wheelHalfH = Profile.WheelWidthIn / 2;
+            <line class="axle-line"
+                  x1="@axleX.ToString("0.##", CultureInfo.InvariantCulture)"
+                  y1="@((-TotalWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                  x2="@axleX.ToString("0.##", CultureInfo.InvariantCulture)"
+                  y2="@((TotalWidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))" />
+            <rect class="wheel"
+                  x="@((axleX - wheelHalfW).ToString("0.##", CultureInfo.InvariantCulture))"
+                  y="@((-Profile.TrackWidthHalfIn - wheelHalfH).ToString("0.##", CultureInfo.InvariantCulture))"
+                  width="@Profile.WheelDiameterIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  height="@Profile.WheelWidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  rx="1.2" />
+            <rect class="wheel"
+                  x="@((axleX - wheelHalfW).ToString("0.##", CultureInfo.InvariantCulture))"
+                  y="@((Profile.TrackWidthHalfIn - wheelHalfH).ToString("0.##", CultureInfo.InvariantCulture))"
+                  width="@Profile.WheelDiameterIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  height="@Profile.WheelWidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                  rx="1.2" />
+        }
+
+        <!-- Hitch ball -->
+        <circle class="hitch-ball" cx="0" cy="0" r="1.6" />
+
+        <!-- Equipment (fixed position, e.g. roof A/C) -->
+        @foreach (var eq in Profile.Equipment)
+        {
+            <g class="equipment-marker" transform="translate(@eq.XIn.ToString("0.##", CultureInfo.InvariantCulture) @eq.YIn.ToString("0.##", CultureInfo.InvariantCulture))">
+                <circle r="3.2" />
+                <text class="equipment-label" y="6">@eq.Name</text>
+            </g>
+        }
+
+        <!-- Cargo -->
+        @foreach (var item in Cargo)
+        {
+            var bounds = EffectiveBounds;
+            var minX = bounds.XMinIn;
+            var maxX = bounds.XMaxIn - item.LengthIn;
+            var minY = bounds.YMinIn;
+            var maxY = bounds.YMaxIn - item.WidthIn;
+
+            <g class="cargo-group @(item.Id == SelectedCargoId ? "selected" : "")"
+               data-cargo-id="@item.Id"
+               data-x-in="@item.XIn.ToString("0.##", CultureInfo.InvariantCulture)"
+               data-y-in="@item.YIn.ToString("0.##", CultureInfo.InvariantCulture)"
+               data-min-x-in="@minX.ToString("0.##", CultureInfo.InvariantCulture)"
+               data-max-x-in="@maxX.ToString("0.##", CultureInfo.InvariantCulture)"
+               data-min-y-in="@minY.ToString("0.##", CultureInfo.InvariantCulture)"
+               data-max-y-in="@maxY.ToString("0.##", CultureInfo.InvariantCulture)"
+               transform="translate(@item.XIn.ToString("0.##", CultureInfo.InvariantCulture) @item.YIn.ToString("0.##", CultureInfo.InvariantCulture))"
+               @onclick="() => SelectCargo(item.Id)" @onclick:stopPropagation="true">
+                <rect class="cargo-box"
+                      width="@item.LengthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      height="@item.WidthIn.ToString("0.##", CultureInfo.InvariantCulture)"
+                      rx="0.6"
+                      style="fill:@item.Color" />
+                <text class="cargo-label"
+                      x="@((item.LengthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))"
+                      y="@((item.WidthIn / 2).ToString("0.##", CultureInfo.InvariantCulture))">
+                    @item.Name
+                </text>
+            </g>
+        }
+    </svg>
+</div>
+
+@code {
+    private readonly string _containerId = $"floorplan-{Guid.NewGuid():N}";
+    private DotNetObjectReference<TrailerFloorPlan>? _selfRef;
+
+    [Parameter, EditorRequired] public required TrailerProfile Profile { get; set; }
+    [Parameter, EditorRequired] public required IReadOnlyList<CargoItem> Cargo { get; set; }
+    [Parameter] public string? SelectedCargoId { get; set; }
+    [Parameter] public EventCallback<string?> OnCargoSelected { get; set; }
+    [Parameter] public EventCallback<(string Id, double XIn, double YIn)> OnCargoDragLive { get; set; }
+    [Parameter] public EventCallback<(string Id, double XIn, double YIn)> OnCargoDragCommit { get; set; }
+    [Parameter] public EventCallback<(string CatalogId, double XIn, double YIn)> OnCatalogItemDropped { get; set; }
+
+    private double TotalLengthIn => Profile.TongueLengthIn + Profile.BodyLengthIn;
+    private double TotalWidthIn => Profile.BodyWidthIn;
+
+    private CargoBounds EffectiveBounds => Profile.CargoBounds ?? new CargoBounds
+    {
+        XMinIn = Profile.TongueLengthIn,
+        XMaxIn = Profile.TongueLengthIn + Profile.BodyLengthIn,
+        YMinIn = -Profile.BodyWidthIn / 2,
+        YMaxIn = Profile.BodyWidthIn / 2,
+    };
+
+    private string TonguePoints
+    {
+        get
+        {
+            var tongueHalfWidth = Math.Min(TotalWidthIn * 0.12, 6);
+            return string.Create(CultureInfo.InvariantCulture,
+                $"0,0 {Profile.TongueLengthIn:0.##},{-tongueHalfWidth:0.##} {Profile.TongueLengthIn:0.##},{tongueHalfWidth:0.##}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _selfRef = DotNetObjectReference.Create(this);
+        try
+        {
+            await Js.InvokeVoidAsync("tlb.initFloorPlan", _containerId, _selfRef, TotalLengthIn, TotalWidthIn);
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Without this, drag-and-drop just won't be interactive - not worth tearing down
+            // the whole circuit over (the rest of the page, including click-to-add, still works).
+            Logger.LogWarning(ex, "Could not initialize floor plan drag interaction");
+        }
+    }
+
+    private Task SelectCargo(string id) => OnCargoSelected.InvokeAsync(id);
+
+    private Task OnBackgroundClick() => OnCargoSelected.InvokeAsync(null);
+
+    [JSInvokable]
+    public Task OnCargoDragging(string id, double xIn, double yIn) =>
+        OnCargoDragLive.InvokeAsync((id, xIn, yIn));
+
+    [JSInvokable]
+    public Task OnCatalogDrop(string catalogId, double xIn, double yIn) =>
+        OnCatalogItemDropped.InvokeAsync((catalogId, xIn, yIn));
+
+    [JSInvokable]
+    public async Task OnCargoDragEnd(string id, double xIn, double yIn, bool moved)
+    {
+        if (moved)
+        {
+            await OnCargoDragCommit.InvokeAsync((id, xIn, yIn));
+        }
+        await OnCargoSelected.InvokeAsync(id);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_selfRef is not null)
+        {
+            try
+            {
+                _selfRef.Dispose();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Circuit already gone (tab closed / navigated away) - nothing to clean up.
+            }
+        }
+        await ValueTask.CompletedTask;
+    }
+}

@@ -1,0 +1,14 @@
+services:
+  trailer-load-balance:
+    build:
+      context: ./src
+      dockerfile: TrailerLoadBalance.Web/Dockerfile
+    container_name: trailer-load-balance
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - trailer-keys:/root/.aspnet/DataProtection-Keys
+
+volumes:
+  trailer-keys:

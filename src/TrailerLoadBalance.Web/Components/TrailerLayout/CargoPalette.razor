@@ -1,0 +1,25 @@
+@using TrailerLoadBalance.Web.Models
+
+<div class="cargo-palette">
+    <h2 class="panel-title">Cargo</h2>
+    <p class="panel-hint">Drag an item onto the trailer, or click to add it.</p>
+    <div class="palette-list">
+        @foreach (var item in CatalogItems)
+        {
+            <button type="button" class="palette-item" data-catalog-id="@item.Id" data-catalog-icon="@(item.IconEmoji ?? "📦")"
+                    @onclick="() => OnAddCargo.InvokeAsync(item)">
+                <span class="palette-icon">@(item.IconEmoji ?? "📦")</span>
+                <span class="palette-name">@item.Name</span>
+                @if (!item.IsCustomizable)
+                {
+                    <span class="palette-meta">@item.DefaultWeightLb.ToString("0") lb</span>
+                }
+            </button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required IReadOnlyList<CargoCatalogItem> CatalogItems { get; set; }
+    [Parameter] public EventCallback<CargoCatalogItem> OnAddCargo { get; set; }
+}
