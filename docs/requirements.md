@@ -322,11 +322,21 @@ centerline, sized `WheelWidthIn × WheelDiameterIn` (§6).
 ### 8.4 Drag-from-palette-to-canvas
 
 User testing showed the expectation was to *drag* a palette item directly onto the trailer to
-place it, not just click it. Added alongside the existing click-to-add (both work now): palette
-buttons are `draggable="true"` with a `data-catalog-id`; native HTML5 drag-and-drop is handled
-entirely in `app.js` (a document-level `dragstart` listener reads the catalog id, the floor plan's
-`dragover`/`drop` listeners compute the drop position in inches and call back into Blazor with the
-catalog id + position). This sidesteps the earlier concern about Blazor's `DataTransfer` C# API
-(§7, original) - no Blazor drag event args are used at all, only a single JS→.NET call at drop
-time, the same pattern as the existing cargo-repositioning drag. The dropped item is centered
-under the cursor and clamped to the profile's cargo bounds.
+place it, not just click it. First attempt used native HTML5 drag-and-drop (`draggable="true"` +
+`dragstart`/`dragover`/`drop`) - this let the drag start but the drop never landed. Root cause:
+Safari (and other browsers to varying degrees) does not reliably populate `dataTransfer.types`
+during `dragover`, so a conditional `preventDefault()` gated on checking those types silently
+never runs, and per the HTML5 DnD spec a `drop` event only fires if `dragover` called
+`preventDefault()`. This is a known cross-browser rough edge with the native API, not something
+worth working around per-browser.
+
+**Fixed by dropping native HTML5 DnD entirely** and reusing the same Pointer Events mechanism
+already proven for repositioning cargo on the canvas (§6, `pointerdown`/`pointermove`/`pointerup`,
+bound once on `document` since palette buttons live outside the floor plan's own container). A
+plain click/tap (no movement past a small pixel threshold) is left untouched so Blazor's normal
+`@onclick` "click to add" keeps working as a fallback; once the pointer moves past the threshold,
+a small floating icon "ghost" follows the cursor and the floor plan gets an outline highlight
+while hovered, and on release - if released over the floor plan - the drop position (inches) and
+catalog id are sent to Blazor via the same `OnCatalogDrop` callback as before. No native
+`DataTransfer` API is used at any point. The dropped item is centered under the cursor and clamped
+to the profile's cargo bounds.

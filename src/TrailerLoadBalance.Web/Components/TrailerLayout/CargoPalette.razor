@@ -6,7 +6,7 @@
     <div class="palette-list">
         @foreach (var item in CatalogItems)
         {
-            <button type="button" class="palette-item" draggable="true" data-catalog-id="@item.Id"
+            <button type="button" class="palette-item" data-catalog-id="@item.Id" data-catalog-icon="@(item.IconEmoji ?? "📦")"
                     @onclick="() => OnAddCargo.InvokeAsync(item)">
                 <span class="palette-icon">@(item.IconEmoji ?? "📦")</span>
                 <span class="palette-name">@item.Name</span>

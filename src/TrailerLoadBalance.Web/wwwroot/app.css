@@ -222,6 +222,7 @@ body {
     font: inherit;
     text-align: left;
     cursor: grab;
+    touch-action: none;
     transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
@@ -266,6 +267,25 @@ body {
     box-shadow: var(--shadow-md);
     touch-action: none;
     user-select: none;
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    transition: outline-color var(--transition-fast);
+}
+
+.floor-plan.drop-target-active {
+    outline-color: var(--color-primary);
+}
+
+.tlb-drag-ghost {
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    font-size: 1.6rem;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 8px rgba(20, 30, 60, 0.25));
+    opacity: 0.9;
 }
 
 .tongue {

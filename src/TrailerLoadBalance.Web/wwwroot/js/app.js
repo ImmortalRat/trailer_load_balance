@@ -4,12 +4,22 @@
 // The floor plan SVG uses viewBox units == inches, so Blazor never needs to know pixel scale;
 // it just renders transform="translate(xIn yIn)". JS only needs pixels-per-inch (ppi) to convert
 // raw pointer-event CSS-pixel deltas into inches while dragging.
+//
+// Everything drag-related uses Pointer Events (pointerdown/move/up), not native HTML5
+// drag-and-drop - deliberately. The HTML5 DnD API (draggable="true", dragstart/dragover/drop) has
+// real cross-browser gaps (Safari in particular does not reliably populate dataTransfer.types
+// during dragover, which silently blocks the drop). Pointer Events are broadly and consistently
+// supported and are already used for repositioning cargo on the canvas, so palette-to-canvas
+// dragging reuses the exact same mechanism instead of a second, less reliable one.
 window.tlb = (function () {
     const STORAGE_KEY = "tlb.state.v1";
     const DRAG_SEND_INTERVAL_MS = 50;
+    const MOVE_THRESHOLD_IN_PX = 6;
 
     let dragState = null;
+    let paletteDragState = null;
     let floorPlanDotNetRef = null;
+    let floorPlanContainerEl = null;
     let pixelsPerInch = 1;
     let lastSentAt = 0;
     let totalLengthIn = 1;
@@ -26,6 +36,7 @@ window.tlb = (function () {
         if (!container) {
             return;
         }
+        floorPlanContainerEl = container;
 
         recomputeScale(container);
         ensurePaletteDragBound();
@@ -40,54 +51,8 @@ window.tlb = (function () {
         container.addEventListener("pointerup", onPointerUp);
         container.addEventListener("pointercancel", onPointerUp);
 
-        container.addEventListener("dragover", onDragOver);
-        container.addEventListener("drop", onDrop);
-
         resizeObserver = new ResizeObserver(() => recomputeScale(container));
         resizeObserver.observe(container);
-    }
-
-    // Dragging a palette item (outside the SVG) onto the floor plan to add new cargo. This is
-    // plain HTML5 drag-and-drop, kept entirely in JS - only the final drop position and the
-    // dragged catalog item id cross into Blazor, so there's no dependency on Blazor's DataTransfer
-    // marshaling for the drag itself.
-    function ensurePaletteDragBound() {
-        if (paletteDragBound) {
-            return;
-        }
-        paletteDragBound = true;
-        document.addEventListener("dragstart", (e) => {
-            const target = e.target.closest("[data-catalog-id]");
-            if (!target || !e.dataTransfer) {
-                return;
-            }
-            e.dataTransfer.setData("text/plain", target.getAttribute("data-catalog-id"));
-            e.dataTransfer.effectAllowed = "copy";
-        });
-    }
-
-    function onDragOver(e) {
-        if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("text/plain")) {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-        }
-    }
-
-    function onDrop(e) {
-        if (!e.dataTransfer) {
-            return;
-        }
-        const catalogId = e.dataTransfer.getData("text/plain");
-        if (!catalogId) {
-            return;
-        }
-        e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        const xIn = (e.clientX - rect.left) / pixelsPerInch;
-        const yIn = (e.clientY - rect.top) / pixelsPerInch + viewBoxMinY;
-        if (floorPlanDotNetRef) {
-            floorPlanDotNetRef.invokeMethodAsync("OnCatalogDrop", catalogId, xIn, yIn);
-        }
     }
 
     function recomputeScale(container) {
@@ -100,6 +65,8 @@ window.tlb = (function () {
     function clamp(value, min, max) {
         return Math.min(Math.max(value, min), max);
     }
+
+    // ---- Repositioning cargo already on the floor plan ----
 
     function onPointerDown(e) {
         const target = e.target.closest("[data-cargo-id]");
@@ -161,6 +128,96 @@ window.tlb = (function () {
         if (floorPlanDotNetRef) {
             floorPlanDotNetRef.invokeMethodAsync("OnCargoDragEnd", cargoId, x, y, moved);
         }
+    }
+
+    // ---- Dragging a palette item onto the floor plan to add new cargo ----
+    // Bound on `document` (once) since palette items live outside the floor plan's own
+    // container. A plain click (no movement past the threshold) is left alone entirely so
+    // Blazor's normal @onclick "click to add" keeps working as a fallback - only once the
+    // pointer has actually moved do we take over, show a drag ghost, and suppress the click.
+
+    function ensurePaletteDragBound() {
+        if (paletteDragBound) {
+            return;
+        }
+        paletteDragBound = true;
+
+        document.addEventListener("pointerdown", (e) => {
+            const target = e.target.closest("[data-catalog-id]");
+            if (!target) {
+                return;
+            }
+            paletteDragState = {
+                catalogId: target.getAttribute("data-catalog-id"),
+                icon: target.getAttribute("data-catalog-icon") || "\u{1F4E6}",
+                pointerId: e.pointerId,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                moved: false,
+                ghostEl: null,
+            };
+        });
+
+        document.addEventListener("pointermove", (e) => {
+            if (!paletteDragState || paletteDragState.pointerId !== e.pointerId) {
+                return;
+            }
+            const dx = e.clientX - paletteDragState.startClientX;
+            const dy = e.clientY - paletteDragState.startClientY;
+            if (!paletteDragState.moved && Math.hypot(dx, dy) > MOVE_THRESHOLD_IN_PX) {
+                paletteDragState.moved = true;
+                paletteDragState.ghostEl = createPaletteGhost(paletteDragState.icon);
+            }
+            if (paletteDragState.moved && paletteDragState.ghostEl) {
+                paletteDragState.ghostEl.style.left = `${e.clientX}px`;
+                paletteDragState.ghostEl.style.top = `${e.clientY}px`;
+                if (floorPlanContainerEl) {
+                    const over = isPointOverElement(e.clientX, e.clientY, floorPlanContainerEl);
+                    floorPlanContainerEl.classList.toggle("drop-target-active", over);
+                }
+            }
+        });
+
+        const end = (e) => {
+            if (!paletteDragState || paletteDragState.pointerId !== e.pointerId) {
+                return;
+            }
+            const drag = paletteDragState;
+            paletteDragState = null;
+
+            if (drag.ghostEl) {
+                drag.ghostEl.remove();
+            }
+            if (floorPlanContainerEl) {
+                floorPlanContainerEl.classList.remove("drop-target-active");
+            }
+            if (!drag.moved) {
+                // Plain click/tap - let the normal Blazor onclick handle adding the item.
+                return;
+            }
+
+            if (floorPlanContainerEl && floorPlanDotNetRef && isPointOverElement(e.clientX, e.clientY, floorPlanContainerEl)) {
+                const rect = floorPlanContainerEl.getBoundingClientRect();
+                const xIn = (e.clientX - rect.left) / pixelsPerInch;
+                const yIn = (e.clientY - rect.top) / pixelsPerInch + viewBoxMinY;
+                floorPlanDotNetRef.invokeMethodAsync("OnCatalogDrop", drag.catalogId, xIn, yIn);
+            }
+        };
+        document.addEventListener("pointerup", end);
+        document.addEventListener("pointercancel", end);
+    }
+
+    function isPointOverElement(clientX, clientY, el) {
+        const rect = el.getBoundingClientRect();
+        return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+    }
+
+    function createPaletteGhost(icon) {
+        const el = document.createElement("div");
+        el.className = "tlb-drag-ghost";
+        el.textContent = icon;
+        document.body.appendChild(el);
+        return el;
     }
 
     // localStorage can throw (not just return null) in private/incognito modes, or when a
